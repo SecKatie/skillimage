@@ -71,7 +71,7 @@ func Load(dir string, opts Options) (*Package, error) {
 	}
 	pkg.Agent = agent
 	if opts.AllowNonconformant && !agentskill.HasUsableName(agent, dir) {
-		pkg.fallbackName = filepath.Base(filepath.Clean(dir))
+		pkg.fallbackName = agentskill.DirectoryName(dir)
 	}
 	return pkg, nil
 }
@@ -86,7 +86,7 @@ func (p *Package) Name() string {
 	if p.Card.Metadata.Name != "" {
 		return p.Card.Metadata.Name
 	}
-	return filepath.Base(filepath.Clean(p.Dir))
+	return agentskill.DirectoryName(p.Dir)
 }
 
 func (p *Package) Description() string {

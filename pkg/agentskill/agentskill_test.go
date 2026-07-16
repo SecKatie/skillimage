@@ -57,3 +57,21 @@ func TestValidateMetadataValuesMustBeStrings(t *testing.T) {
 		t.Fatal("expected non-string metadata value to fail")
 	}
 }
+
+func TestValidateCurrentDirectoryUsesActualBasename(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "feature-brainstorming")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	skill, err := agentskill.Parse([]byte("---\nname: feature-brainstorming\ndescription: Designs features.\n---\nBody\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findings := agentskill.Validate(skill, "."); len(findings) != 0 {
+		t.Fatalf("Validate from current directory returned %v", findings)
+	}
+	if !agentskill.HasUsableName(skill, ".") {
+		t.Fatal("current-directory skill name should be usable")
+	}
+}

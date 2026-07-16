@@ -108,13 +108,14 @@ func splitFrontmatter(data []byte) ([]byte, []byte, error) {
 
 func Validate(skill *Skill, skillDir string) []ValidationError {
 	var errs []ValidationError
+	dirName := DirectoryName(skillDir)
 	if n := utf8.RuneCountInString(skill.Name); n < 1 || n > 64 {
 		errs = append(errs, ValidationError{"name", "must be between 1 and 64 characters"})
 	} else if !validName.MatchString(skill.Name) {
 		errs = append(errs, ValidationError{"name", "must contain only lowercase letters, numbers, and single hyphens"})
 	}
-	if skill.Name != "" && filepath.Base(filepath.Clean(skillDir)) != skill.Name {
-		errs = append(errs, ValidationError{"name", fmt.Sprintf("must match parent directory name %q", filepath.Base(filepath.Clean(skillDir)))})
+	if skill.Name != "" && dirName != skill.Name {
+		errs = append(errs, ValidationError{"name", fmt.Sprintf("must match parent directory name %q", dirName)})
 	}
 	if n := utf8.RuneCountInString(skill.Description); n < 1 || n > 1024 {
 		errs = append(errs, ValidationError{"description", "must be between 1 and 1024 characters"})
@@ -135,5 +136,16 @@ func Validate(skill *Skill, skillDir string) []ValidationError {
 // returns false.
 func HasUsableName(skill *Skill, skillDir string) bool {
 	n := utf8.RuneCountInString(skill.Name)
-	return n >= 1 && n <= 64 && validName.MatchString(skill.Name) && skill.Name == filepath.Base(filepath.Clean(skillDir))
+	return n >= 1 && n <= 64 && validName.MatchString(skill.Name) && skill.Name == DirectoryName(skillDir)
+}
+
+// DirectoryName returns the logical basename for a skill path. Resolving to an
+// absolute path turns "." into the current directory name without evaluating
+// intentional symlinks supplied by the user.
+func DirectoryName(skillDir string) string {
+	abs, err := filepath.Abs(skillDir)
+	if err == nil {
+		return filepath.Base(filepath.Clean(abs))
+	}
+	return filepath.Base(filepath.Clean(skillDir))
 }

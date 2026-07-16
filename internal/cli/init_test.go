@@ -84,3 +84,24 @@ func TestInitCollisionListsFilesAndForceReplacesManagedFiles(t *testing.T) {
 		t.Fatalf("forced init did not replace card: %q, %v", data, err)
 	}
 }
+
+func TestInitCurrentDirectoryUsesActualBasename(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "feature-brainstorming")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := runInit(cmd, ".", initOptions{version: "0.1.0"}); err != nil {
+		t.Fatalf("runInit from current directory: %v", err)
+	}
+	data, err := os.ReadFile("SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: feature-brainstorming") {
+		t.Fatalf("generated SKILL.md used the wrong name:\n%s", data)
+	}
+}

@@ -134,7 +134,7 @@ func RecordInstallation(ctx context.Context, client *oci.Client, ref, skillsRoot
 	}
 	name := agent.Name
 	if !agentskill.HasUsableName(agent, skillDir) {
-		name = filepath.Base(filepath.Clean(skillDir))
+		name = agentskill.DirectoryName(skillDir)
 	}
 	result, err := client.Inspect(ctx, ref)
 	if err != nil {

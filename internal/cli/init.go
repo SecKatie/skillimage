@@ -72,7 +72,7 @@ func runInit(cmd *cobra.Command, dir string, opts initOptions) error {
 		}
 	} else {
 		if name == "" {
-			name = filepath.Base(filepath.Clean(dir))
+			name = agentskill.DirectoryName(dir)
 		}
 		generatedSkill = generateSkillMD(name, opts.full)
 		agent, err := agentskill.Parse(generatedSkill)
