@@ -4,12 +4,33 @@ import (
 	"testing"
 )
 
+func TestResolveInstallRef(t *testing.T) {
+	tests := map[string]string{
+		"bumbleforge.com/kglitchy/skills/feature-brainstorming":          "bumbleforge.com/kglitchy/skills/feature-brainstorming:latest",
+		"bumbleforge.com/kglitchy/skills/feature-brainstorming:1.2.3":    "bumbleforge.com/kglitchy/skills/feature-brainstorming:1.2.3",
+		"bumbleforge.com/kglitchy/skills/feature-brainstorming@sha256:a": "bumbleforge.com/kglitchy/skills/feature-brainstorming@sha256:a",
+		"feature-brainstorming": "localhost/feature-brainstorming:latest",
+	}
+
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := resolveInstallRef(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("resolveInstallRef(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}
+
 func TestNewSkillCardFromRef(t *testing.T) {
 	tests := []struct {
-		ref       string
-		wantName  string
-		wantVer   string
-		wantNS    string
+		ref      string
+		wantName string
+		wantVer  string
+		wantNS   string
 	}{
 		{
 			ref:      "test/hello-world:1.0.0-draft",
