@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/dustin/go-humanize v1.0.1
+	github.com/github/go-spdx/v2 v2.7.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1

@@ -108,16 +108,13 @@ func repoFromRef(ref string) string {
 	return ref
 }
 
-// highestPublished finds the highest semver version among tags that
-// represent published skills (no -draft or -testing suffix).
+// highestPublished finds the highest final semantic version. Mutable aliases
+// and every prerelease form (legacy or alpha2) are excluded.
 func highestPublished(tags []string) *semver.Version {
 	var best *semver.Version
 	for _, tag := range tags {
-		if strings.HasSuffix(tag, "-draft") || strings.HasSuffix(tag, "-testing") {
-			continue
-		}
 		v, err := semver.StrictNewVersion(tag)
-		if err != nil {
+		if err != nil || v.Prerelease() != "" || v.Metadata() != "" {
 			continue
 		}
 		if best == nil || v.GreaterThan(best) {

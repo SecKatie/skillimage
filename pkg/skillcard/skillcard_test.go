@@ -27,6 +27,24 @@ spec:
   prompt: SKILL.md
 `
 
+const validV1Alpha2YAML = `apiVersion: skillimage.io/v1alpha2
+kind: SkillCard
+metadata:
+  version: 1.2.3
+  title: PDF Processing
+  vendor: Example Corp
+  tags: [pdf, documents]
+  authors:
+    - name: Test Author
+      email: test@example.com
+  url: https://example.com/pdf
+  documentation: https://docs.example.com/pdf
+  support: https://example.com/support
+  changelog: https://example.com/changelog
+  annotations:
+    com.example.security.reviewed: "true"
+`
+
 func TestParse(t *testing.T) {
 	sc, err := skillcard.Parse(strings.NewReader(validSkillYAML))
 	if err != nil {
@@ -211,5 +229,100 @@ metadata:
 	errs, _ := skillcard.Validate(sc)
 	if len(errs) == 0 {
 		t.Fatal("expected error for wrong apiVersion")
+	}
+}
+
+func TestUnknownVersionWithAlpha2FieldsReturnsSupportedVersionFinding(t *testing.T) {
+	sc, err := skillcard.Parse(strings.NewReader(`apiVersion: skillimage.io/v9
+kind: SkillCard
+metadata:
+  version: 1.0.0
+  title: Future Card
+`))
+	if err != nil {
+		t.Fatalf("Parse should preserve unknown version for validation: %v", err)
+	}
+	errs, err := skillcard.Validate(sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, skillcard.APIVersionV1Alpha1) || !strings.Contains(errs[0].Message, skillcard.APIVersionV1Alpha2) {
+		t.Fatalf("unexpected validation findings: %#v", errs)
+	}
+}
+
+func TestParseSerializeV1Alpha2(t *testing.T) {
+	sc, err := skillcard.Parse(strings.NewReader(validV1Alpha2YAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if sc.APIVersion != skillcard.APIVersionV1Alpha2 || sc.Metadata.Version != "1.2.3" {
+		t.Fatalf("unexpected parsed card: %#v", sc)
+	}
+	if sc.Metadata.Name != "" || sc.Metadata.Namespace != "" || sc.Spec != nil || sc.Provenance != nil {
+		t.Fatalf("alpha2 populated removed fields: %#v", sc)
+	}
+	if sc.Metadata.Annotations["com.example.security.reviewed"] != "true" {
+		t.Fatalf("annotation was not preserved: %#v", sc.Metadata.Annotations)
+	}
+	var out bytes.Buffer
+	if err := skillcard.Serialize(sc, &out); err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	for _, removed := range []string{"namespace:", "description:", "license:", "allowed-tools:", "spec:", "provenance:"} {
+		if strings.Contains(out.String(), removed) {
+			t.Errorf("serialized alpha2 contains removed field %q:\n%s", removed, out.String())
+		}
+	}
+}
+
+func TestV1Alpha2RequiresCoreSemver(t *testing.T) {
+	for _, version := range []string{"1.2", "v1.2.3", "1.2.3-beta.1", "1.2.3+build"} {
+		yaml := strings.Replace(validV1Alpha2YAML, "version: 1.2.3", `version: "`+version+`"`, 1)
+		sc, err := skillcard.Parse(strings.NewReader(yaml))
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", version, err)
+		}
+		errs, err := skillcard.Validate(sc)
+		if err != nil {
+			t.Fatalf("Validate(%q): %v", version, err)
+		}
+		if len(errs) == 0 {
+			t.Errorf("expected version %q to be rejected", version)
+		}
+	}
+}
+
+func TestV1Alpha2RejectsRemovedAndInvalidAnnotationFields(t *testing.T) {
+	withRemoved := strings.Replace(validV1Alpha2YAML, "  version: 1.2.3", "  version: 1.2.3\n  namespace: legacy", 1)
+	if _, err := skillcard.Parse(strings.NewReader(withRemoved)); err == nil {
+		t.Fatal("expected removed alpha2 field to fail strict parsing")
+	}
+
+	badKey := strings.Replace(validV1Alpha2YAML, "com.example.security.reviewed", "not-reverse-domain", 1)
+	sc, err := skillcard.Parse(strings.NewReader(badKey))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	errs, err := skillcard.Validate(sc)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected invalid annotation key to fail")
+	}
+}
+
+func TestV1Alpha2RejectsNonStringCatalogValuesWithoutYAMLCoercion(t *testing.T) {
+	for name, yaml := range map[string]string{
+		"annotation": strings.Replace(validV1Alpha2YAML, `com.example.security.reviewed: "true"`, `com.example.security.reviewed: true`, 1),
+		"title":      strings.Replace(validV1Alpha2YAML, "title: PDF Processing", "title: 123", 1),
+		"tag":        strings.Replace(validV1Alpha2YAML, "tags: [pdf, documents]", "tags: [pdf, 123]", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := skillcard.Parse(strings.NewReader(yaml)); err == nil {
+				t.Fatal("expected non-string catalog value to fail parsing")
+			}
+		})
 	}
 }

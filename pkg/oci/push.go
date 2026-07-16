@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,9 +12,12 @@ import (
 	"strings"
 
 	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+
+	"github.com/redhat-et/skillimage/pkg/lifecycle"
 )
 
 // Push copies an image from the local OCI store to a remote registry.
@@ -24,12 +28,35 @@ func (c *Client) Push(ctx context.Context, ref string, opts PushOptions) error {
 	}
 
 	_, tag := splitRefTag(ref)
+	localDesc, err := c.store.Resolve(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("resolving local reference %s: %w", ref, err)
+	}
+	if result, inspectErr := c.Inspect(ctx, ref); inspectErr == nil && result.SkillCardVersion == "skillimage.io/v1alpha2" && immutableAlpha2Tag(tag, result.Version) {
+		remoteDesc, resolveErr := repo.Resolve(ctx, tag)
+		switch {
+		case resolveErr == nil && remoteDesc.Digest != localDesc.Digest:
+			return fmt.Errorf("immutable remote tag %s already points to %s (local digest %s)", ref, remoteDesc.Digest, localDesc.Digest)
+		case resolveErr == nil && remoteDesc.Digest == localDesc.Digest:
+			return nil
+		case resolveErr != nil && !errors.Is(resolveErr, errdef.ErrNotFound):
+			return fmt.Errorf("checking immutable remote tag %s: %w", ref, resolveErr)
+		}
+	}
 	_, err = oras.Copy(ctx, c.store, ref, repo, tag, oras.DefaultCopyOptions)
 	if err != nil {
 		return fmt.Errorf("pushing %s: %w", ref, err)
 	}
 
 	return nil
+}
+
+func immutableAlpha2Tag(tag, effectiveVersion string) bool {
+	if tag != effectiveVersion {
+		return false
+	}
+	_, _, _, err := lifecycle.ParseEffectiveVersion(effectiveVersion)
+	return err == nil
 }
 
 // CopyTo copies an image from this client's store to another client's store.

@@ -58,11 +58,29 @@ func runInspect(cmd *cobra.Command, ref string, skipTLSVerify bool) error {
 	if result.License != "" {
 		fmt.Fprintf(out, "License:      %s\n", result.License)
 	}
+	if result.Vendor != "" {
+		fmt.Fprintf(out, "Vendor:       %s\n", result.Vendor)
+	}
+	if result.URL != "" {
+		fmt.Fprintf(out, "URL:          %s\n", result.URL)
+	}
+	if result.Documentation != "" {
+		fmt.Fprintf(out, "Docs:         %s\n", result.Documentation)
+	}
 	if result.Tags != "" {
 		fmt.Fprintf(out, "Tags:         %s\n", result.Tags)
 	}
 	if result.Compatibility != "" {
 		fmt.Fprintf(out, "Compat:       %s\n", result.Compatibility)
+	}
+	if result.AllowedTools != "" {
+		fmt.Fprintf(out, "Allowed Tools: %s\n", result.AllowedTools)
+	}
+	if result.Support != "" {
+		fmt.Fprintf(out, "Support:      %s\n", result.Support)
+	}
+	if result.Changelog != "" {
+		fmt.Fprintf(out, "Changelog:    %s\n", result.Changelog)
 	}
 	if result.WordCount != "" {
 		fmt.Fprintf(out, "Word Count:   %s\n", result.WordCount)

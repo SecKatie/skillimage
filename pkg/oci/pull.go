@@ -122,7 +122,7 @@ func clampDirMode(mode int64) os.FileMode {
 }
 
 func clampFileMode(mode int64) os.FileMode {
-	m := os.FileMode(mode) & 0o644
+	m := os.FileMode(mode) & 0o755
 	if m == 0 {
 		m = 0o644
 	}

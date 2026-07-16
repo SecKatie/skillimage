@@ -96,12 +96,14 @@ func Resolve(ctx context.Context, input string, ref string, filter string) (*Res
 		}
 
 		relPath := relativeToClone(cloneResult.Dir, d.Dir, src.SubPath)
-		if sc.Provenance == nil {
-			sc.Provenance = &skillcard.Provenance{}
+		if sc.APIVersion == skillcard.APIVersionV1Alpha1 {
+			if sc.Provenance == nil {
+				sc.Provenance = &skillcard.Provenance{}
+			}
+			sc.Provenance.Source = src.CloneURL
+			sc.Provenance.Commit = cloneResult.CommitSHA
+			sc.Provenance.Path = relPath
 		}
-		sc.Provenance.Source = src.CloneURL
-		sc.Provenance.Commit = cloneResult.CommitSHA
-		sc.Provenance.Path = relPath
 
 		skills = append(skills, ResolvedSkill{Dir: d.Dir, Name: d.Name, SkillCard: sc})
 	}

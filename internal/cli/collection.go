@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/redhat-et/skillimage/pkg/collection"
-	"github.com/redhat-et/skillimage/pkg/lifecycle"
 	"github.com/redhat-et/skillimage/pkg/oci"
 	"github.com/redhat-et/skillimage/pkg/skillcard"
 	"github.com/redhat-et/skillimage/pkg/source"
@@ -366,20 +365,32 @@ func installFromSource(ctx context.Context, client *oci.Client, s collection.Ski
 
 	fmt.Fprintf(w, "  building...")
 
-	if _, err := client.Build(ctx, skill.Dir, oci.BuildOptions{SkillCard: skill.SkillCard}); err != nil {
+	var builtRefs []string
+	if _, err := client.Build(ctx, skill.Dir, oci.BuildOptions{
+		SkillCard: skill.SkillCard,
+		Tagged:    func(ref string) { builtRefs = append(builtRefs, ref) },
+	}); err != nil {
 		fmt.Fprintln(w)
 		return "", fmt.Errorf("building: %w", err)
 	}
-
-	tag := lifecycle.TagForState(skill.SkillCard.Metadata.Version, lifecycle.Draft)
-	buildRef := fmt.Sprintf("%s/%s:%s", skill.SkillCard.Metadata.Namespace, skill.SkillCard.Metadata.Name, tag)
+	if len(builtRefs) == 0 {
+		fmt.Fprintln(w)
+		return "", fmt.Errorf("building produced no image reference")
+	}
+	buildRef := builtRefs[len(builtRefs)-1]
 	if err := client.Unpack(ctx, buildRef, destDir); err != nil {
 		fmt.Fprintln(w)
 		return "", fmt.Errorf("unpacking: %w", err)
 	}
 
-	skillDir := filepath.Join(destDir, skill.SkillCard.Metadata.Name)
-	writeSourceProvenance(skillDir, skill.SkillCard)
+	skillDir := filepath.Join(destDir, oci.SkillNameFromRef(buildRef))
+	if skill.SkillCard.APIVersion == skillcard.APIVersionV1Alpha2 {
+		if err := RecordInstallation(ctx, client, buildRef, destDir, skillDir); err != nil {
+			fmt.Fprintf(w, "  warning: receipt write failed: %v\n", err)
+		}
+	} else {
+		writeSourceProvenance(skillDir, skill.SkillCard)
+	}
 
 	fmt.Fprintf(w, "  installed\n")
 	return "installed", nil
@@ -411,7 +422,7 @@ func installFromImage(ctx context.Context, client *oci.Client, s collection.Skil
 	}
 
 	skillDir := filepath.Join(destDir, oci.SkillNameFromRef(s.Image))
-	if err := WriteProvenance(ctx, client, s.Image, skillDir); err != nil {
+	if err := RecordInstallation(ctx, client, s.Image, destDir, skillDir); err != nil {
 		fmt.Fprintf(w, "  warning: provenance write failed: %v\n", err)
 	}
 
@@ -445,6 +456,9 @@ func readInstalledCommit(destDir, skillName string) string {
 }
 
 func writeSourceProvenance(skillDir string, sc *skillcard.SkillCard) {
+	if sc.APIVersion == skillcard.APIVersionV1Alpha2 {
+		return
+	}
 	if sc.Provenance == nil {
 		sc.Provenance = &skillcard.Provenance{}
 	}

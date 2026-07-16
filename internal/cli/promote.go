@@ -1,13 +1,13 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/redhat-et/skillimage/pkg/lifecycle"
 	"github.com/redhat-et/skillimage/pkg/oci"
+	"github.com/redhat-et/skillimage/pkg/skillcard"
 )
 
 func newPromoteCmd() *cobra.Command {
@@ -40,28 +40,83 @@ Examples:
 }
 
 func runPromote(cmd *cobra.Command, ref, toState string, local bool, skipTLSVerify bool) error {
-	to, err := lifecycle.ParseState(toState)
-	if err != nil {
-		return fmt.Errorf("invalid target state: %w", err)
-	}
-
 	client, err := defaultClient()
 	if err != nil {
 		return err
 	}
 
-	ctx := context.Background()
-
+	ctx := cmd.Context()
+	var inspected *oci.InspectResult
 	if local {
-		if err := client.PromoteLocal(ctx, ref, to); err != nil {
-			return fmt.Errorf("promoting %s: %w", ref, err)
-		}
+		inspected, err = client.Inspect(ctx, ref)
 	} else {
-		if err := client.Promote(ctx, ref, to, oci.PromoteOptions{SkipTLSVerify: skipTLSVerify}); err != nil {
-			return fmt.Errorf("promoting %s: %w", ref, err)
-		}
+		inspected, err = client.InspectRemote(ctx, ref, oci.InspectOptions{SkipTLSVerify: skipTLSVerify})
+	}
+	if err != nil {
+		return fmt.Errorf("inspecting %s: %w", ref, err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Promoted %s to %s\n", ref, to)
+	if inspected.SkillCardVersion == skillcard.APIVersionV1Alpha2 {
+		to, parseErr := lifecycle.ParseStage(toState)
+		if parseErr != nil {
+			return fmt.Errorf("invalid target stage: %w", parseErr)
+		}
+		if local {
+			err = client.PromoteStageLocal(ctx, ref, to)
+		} else {
+			err = client.PromoteStage(ctx, ref, to, oci.PromoteOptions{SkipTLSVerify: skipTLSVerify})
+		}
+	} else {
+		to, parseErr := lifecycle.ParseState(toState)
+		if parseErr != nil {
+			return fmt.Errorf("invalid target state: %w", parseErr)
+		}
+		if local {
+			err = client.PromoteLocal(ctx, ref, to)
+		} else {
+			err = client.Promote(ctx, ref, to, oci.PromoteOptions{SkipTLSVerify: skipTLSVerify})
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("promoting %s: %w", ref, err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Promoted %s to %s\n", ref, toState)
 	return nil
+}
+
+func newDemoteCmd() *cobra.Command {
+	var toStage string
+	var local bool
+	var tlsVerify bool
+	cmd := &cobra.Command{
+		Use:   "demote <ref>",
+		Short: "Demote a v1alpha2 skill to a lower lifecycle stage",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			to, err := lifecycle.ParseStage(toStage)
+			if err != nil {
+				return fmt.Errorf("invalid target stage: %w", err)
+			}
+			client, err := defaultClient()
+			if err != nil {
+				return err
+			}
+			if local {
+				err = client.DemoteStageLocal(cmd.Context(), args[0], to)
+			} else {
+				err = client.DemoteStage(cmd.Context(), args[0], to, oci.PromoteOptions{SkipTLSVerify: !tlsVerify})
+			}
+			if err != nil {
+				return fmt.Errorf("demoting %s: %w", args[0], err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Demoted %s to %s\n", args[0], to)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&toStage, "to", "", "target lifecycle stage (required)")
+	_ = cmd.MarkFlagRequired("to")
+	cmd.Flags().BoolVar(&local, "local", false, "demote in local store instead of remote registry")
+	cmd.Flags().BoolVar(&tlsVerify, "tls-verify", true, "require HTTPS and verify certificates")
+	return cmd
 }

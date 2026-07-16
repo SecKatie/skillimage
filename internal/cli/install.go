@@ -9,6 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/redhat-et/skillimage/pkg/agentskill"
+	"github.com/redhat-et/skillimage/pkg/installed"
 	"github.com/redhat-et/skillimage/pkg/oci"
 	"github.com/redhat-et/skillimage/pkg/skillcard"
 )
@@ -103,13 +105,47 @@ func runInstall(cmd *cobra.Command, ref string, target string, outputDir string)
 
 	dest := filepath.Join(outputDir, oci.SkillNameFromRef(ref))
 
-	// Write provenance into skill.yaml.
-	if err := WriteProvenance(ctx, client, ref, dest); err != nil {
-		return fmt.Errorf("writing provenance: %w", err)
+	if err := RecordInstallation(ctx, client, ref, outputDir, dest); err != nil {
+		return fmt.Errorf("recording installation: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s to %s\n", ref, dest)
 	return nil
+}
+
+// RecordInstallation preserves alpha1's embedded provenance behavior while
+// recording alpha2 provenance in an external installation receipt.
+func RecordInstallation(ctx context.Context, client *oci.Client, ref, skillsRoot, skillDir string) error {
+	f, err := os.Open(filepath.Join(skillDir, "skill.yaml"))
+	if err != nil {
+		return fmt.Errorf("opening skill.yaml: %w", err)
+	}
+	sc, err := skillcard.Parse(f)
+	_ = f.Close()
+	if err != nil {
+		return fmt.Errorf("parsing skill.yaml: %w", err)
+	}
+	if sc.APIVersion != skillcard.APIVersionV1Alpha2 {
+		return WriteProvenance(ctx, client, ref, skillDir)
+	}
+	agent, err := agentskill.ParseFile(skillDir)
+	if err != nil {
+		return err
+	}
+	name := agent.Name
+	if !agentskill.HasUsableName(agent, skillDir) {
+		name = filepath.Base(filepath.Clean(skillDir))
+	}
+	result, err := client.Inspect(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return installed.WriteReceipt(skillsRoot, installed.Receipt{
+		Name:    name,
+		Version: result.Version,
+		Source:  ref,
+		Digest:  result.Digest,
+	})
 }
 
 func WriteProvenance(ctx context.Context, client *oci.Client, ref, skillDir string) error {
