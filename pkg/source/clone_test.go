@@ -38,6 +38,7 @@ func TestCloneShallow(t *testing.T) {
 	run(workDir, "init")
 	run(workDir, "config", "user.email", "test@test.com")
 	run(workDir, "config", "user.name", "Test")
+	run(workDir, "config", "commit.gpgSign", "false")
 	skillDir := filepath.Join(workDir, "skills", "hello")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("creating skill directory: %v", err)
@@ -92,6 +93,7 @@ func TestCloneSubPathNotFound(t *testing.T) {
 	run(workDir, "init")
 	run(workDir, "config", "user.email", "test@test.com")
 	run(workDir, "config", "user.name", "Test")
+	run(workDir, "config", "commit.gpgSign", "false")
 	if err := os.WriteFile(filepath.Join(workDir, "README.md"), []byte("hi"), 0o644); err != nil {
 		t.Fatalf("writing README.md: %v", err)
 	}
@@ -132,6 +134,8 @@ func TestCloneRefOverride(t *testing.T) {
 	run(workDir, "init")
 	run(workDir, "config", "user.email", "test@test.com")
 	run(workDir, "config", "user.name", "Test")
+	run(workDir, "config", "commit.gpgSign", "false")
+	run(workDir, "config", "tag.gpgSign", "false")
 	if err := os.WriteFile(filepath.Join(workDir, "SKILL.md"), []byte("v1"), 0o644); err != nil {
 		t.Fatalf("writing SKILL.md v1: %v", err)
 	}
