@@ -114,12 +114,16 @@ func (c *Client) buildAlpha2Manifest(ctx context.Context, pkg *skillpackage.Pack
 	repository := "localhost/" + pkg.Name()
 	exactRef := ""
 	if opts.Tag != "" {
+		_, requestedTag := splitRefTag(strings.TrimSpace(opts.Tag))
 		var err error
-		exactRef, err = NormalizeBuildReference(opts.Tag)
+		normalized, err := NormalizeBuildReference(opts.Tag)
 		if err != nil {
 			return ocispec.Descriptor{}, err
 		}
-		repository, _ = splitRefTag(exactRef)
+		repository, _ = splitRefTag(normalized)
+		if requestedTag != "" {
+			exactRef = normalized
+		}
 	}
 
 	stage, number, err := c.nextAlpha2Version(ctx, repository, pkg.Card.Metadata.Version, opts)

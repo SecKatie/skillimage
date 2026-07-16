@@ -386,36 +386,36 @@ Agent Skills arbitrary metadata remains in `SKILL.md`. Registry synchronization
 does not automatically turn it into annotations or download layers merely to
 index it.
 
-## Repository naming and explicit tags
+## Repository and reference behavior
 
-v1alpha2 contains no embedded namespace or repository prefix.
+v1alpha2 contains no embedded namespace or repository prefix. OCI references
+select both the repository and the operation mode:
 
-The `-t, --tag` build option accepts an exact OCI image name using Podman-style
-normalization:
-
-- Prepend `localhost/` when no registry is present.
-- Append `:latest` when no tag is present.
-- Reject digest references because the build digest does not exist yet.
-- Create exactly the requested reference and no automatic aliases.
+- An untagged repository is a managed lifecycle operation.
+- An explicitly tagged reference is an exact OCI operation.
+- Podman-style short names are normalized by prepending `localhost/` when no
+  registry is present.
+- Digest references are rejected as build targets because the build digest
+  does not exist yet.
 
 Examples:
 
 ```text
 skillctl build -t pdf-processing .
+-> localhost/pdf-processing:1.2.0-alpha.1
 -> localhost/pdf-processing:latest
 
-skillctl build -t bumbleforge.com/kglitchy/skills/pdf-processing:canary .
--> bumbleforge.com/kglitchy/skills/pdf-processing:canary
+skillctl build -t bumbleforge.com/example/pdf-processing:canary .
+-> bumbleforge.com/example/pdf-processing:canary
 ```
 
-Additional aliases are created explicitly with:
+An explicitly tagged build creates exactly one local reference, may replace an
+existing local tag, and does not move local `latest`. Local tags are workspace
+state and are intentionally replaceable. An explicit push operates only on the
+requested remote tag.
 
-```text
-skillctl tag <source> <target>
-```
-
-For a multi-skill Git source, `-t` remains invalid because a single exact
-reference cannot name multiple artifacts.
+For a multi-skill Git source, `-t` remains invalid because a single repository
+or exact reference cannot name multiple artifacts.
 
 ## SemVer lifecycle
 
@@ -441,18 +441,20 @@ Examples:
 Dot-separated numeric identifiers are used so SemVer compares prerelease
 numbers numerically.
 
-### Opinionated build path
+### Managed build path
 
-Without `-t`, `skillctl build .` follows the self-directed lifecycle path:
+Without `-t`, or with an untagged `-t` repository target, `skillctl build`
+follows the managed local lifecycle path:
 
-1. Use repository `localhost/<SKILL.md.name>`.
+1. Use repository `localhost/<SKILL.md.name>` by default, or the normalized
+   untagged `-t` repository when supplied.
 2. Resolve that repository's local `latest` reference.
 3. Compare its effective base version to `metadata.version`.
 4. If no matching version exists, build `alpha.1`.
 5. If the base version matches, remain in the current prerelease stage and
    allocate its next available number.
 6. If the matching version is final, fail and require a base-version bump.
-7. Create both the numbered prerelease tag and `latest`.
+7. Create both the effective-version tag and local `latest`.
 
 Examples:
 
@@ -464,9 +466,8 @@ latest is 1.2.0-rc.1    -> 1.2.0-rc.2
 latest is 1.2.0         -> fail; bump metadata.version
 ```
 
-An explicit `-t` creates only its exact normalized reference. The build still
-records its effective artifact version and lifecycle status in annotations, but
-does not create or move the lifecycle tags implicitly.
+Build never accesses a registry unless `--push` is supplied. `build --push`
+keeps the successful local build even if publication fails.
 
 ### Overrides
 
@@ -482,29 +483,34 @@ be positive and fails if its immutable tag already exists.
 
 ### Promotion
 
-Promotion moves only to a higher lifecycle stage and does not change package
-content.
+Promotion is local by default, uses the managed repository's local `latest`,
+and advances one stage automatically:
 
 ```text
-skillctl promote localhost/pdf-processing:1.2.0-alpha.4 --to beta
--> localhost/pdf-processing:1.2.0-beta.1
+skillctl promote bumbleforge.com/example/pdf-processing
+alpha.N -> beta.1 -> rc.1 -> final
 ```
 
-Cross-stage promotion uses `.1` when the target stage is unused, otherwise the
-next available target-stage number. Final promotion creates the unqualified
-base-version tag.
+`--to` remains available for an intentional forward skip. Cross-stage
+promotion uses `.1` when the target stage is unused, otherwise the next
+available target-stage number. Final promotion creates the unqualified base
+version tag. Promoting an already-final base version fails and requires a base
+version bump.
 
-Promotion moves `latest` to the promoted manifest only when `latest` currently
-points to the source being promoted. Promoting an older build line therefore
-cannot take `latest` away from a newer line.
+Promotion does not access the registry. `promote --push` promotes locally and
+then publishes the result. Direct remote promotion is not part of the managed
+workflow; pull first when the desired source exists only in the registry. The
+existing `--local` flag is redundant under this model and may remain as a
+deprecated no-op during the compatibility window.
 
 ### Demotion
 
-`skillctl demote` moves only to a lower stage, retains all historical tags, and
-allocates the next available number in the target stage.
+`skillctl demote` is also a local lifecycle operation. It moves only to a lower
+stage, retains all historical tags, and allocates the next available number in
+the target stage.
 
 ```text
-skillctl demote localhost/pdf-processing:1.2.0-rc.1 --to beta
+skillctl demote localhost/pdf-processing --to beta
 -> localhost/pdf-processing:1.2.0-beta.2
 ```
 
@@ -512,48 +518,91 @@ Like promotion, demotion moves `latest` only when it currently points to the
 source being transitioned. A subsequent argument-free build then remains in
 the demoted stage and allocates its next number.
 
-### Tag mutability
+### Local and remote cursors
 
-- Numbered prerelease tags are immutable.
-- Final version tags are immutable.
-- `latest` is mutable and represents the current lifecycle cursor, not the
-  latest published release.
-- Custom aliases such as `canary` are mutable.
-- Automatic allocation advances past existing numbered tags.
-- Explicit-number collisions fail.
-- Remote pushes of immutable tags fail when the remote tag points to a
-  different digest; pushing the same digest is idempotent.
+Local `latest` is the private working lifecycle cursor. Remote `latest` is the
+most recently published cursor. Local state may move ahead through builds and
+promotions without being shared:
 
-Catalog and upgrade logic must not interpret `latest` as "latest published."
-The lifecycle annotation is authoritative for maturity.
+```text
+local latest:  1.2.0-rc.1
+remote latest: 1.2.0-beta.2
+```
+
+This is valid. The next managed push may publish the local cursor because it is
+a monotonic forward move. Catalog and upgrade logic must interpret remote
+`latest` as the latest published cursor, while build and local lifecycle logic
+use local `latest`. The lifecycle annotation is authoritative for maturity.
 
 v1alpha1 retains its legacy draft/testing/published behavior, including its
 published-to-latest behavior.
 
 ## Push behavior
 
-`skillctl push <ref>` remains a one-reference operation. A build using `-t`
-can therefore be pushed directly with the same exact reference.
-
-When the argument-free build creates a numbered tag and `latest`, users choose
-which references to publish. They first assign the destination repository
-explicitly:
+An untagged push is managed:
 
 ```text
-skillctl tag \
-  localhost/pdf-processing:1.2.0-beta.2 \
-  bumbleforge.com/example/pdf-processing:1.2.0-beta.2
-
-skillctl tag \
-  localhost/pdf-processing:latest \
-  bumbleforge.com/example/pdf-processing:latest
-
-skillctl push bumbleforge.com/example/pdf-processing:1.2.0-beta.2
-skillctl push bumbleforge.com/example/pdf-processing:latest
+skillctl push bumbleforge.com/example/pdf-processing
 ```
 
-Repository aliases needed before push are created explicitly with
-`skillctl tag`.
+It reads local `latest`, derives the effective version from the manifest
+annotation, validates remote state, pushes the effective-version tag first,
+and moves remote `latest` only after that succeeds. An explicitly tagged push
+continues to push exactly one reference.
+
+Managed push allows a monotonic forward publication. It refuses when remote
+`latest` is ahead, when the local base version is older, or when the same
+effective version has a different digest. A refusal reports both states and
+recommends either `skillctl pull <repository>` or an intentional `--force`.
+
+`--force` may replace both a conflicting remote version tag and remote
+`latest`. The flag is sufficient authorization and does not prompt, making it
+usable in CI. Output records the old and new digests. Without `--force`, a push
+to an existing version tag with the same digest succeeds idempotently.
+
+OCI registries do not provide a transaction across two tags. All conflict
+checks complete before mutation. If the effective version succeeds but moving
+`latest` fails, the version remains published and rerunning the push safely
+completes the operation.
+
+## Pull behavior
+
+An untagged pull synchronizes the managed published cursor:
+
+```text
+skillctl pull bumbleforge.com/example/pdf-processing
+```
+
+It resolves remote `latest`, reads its effective version annotation, copies the
+content once, and creates both the local effective-version tag and local
+`latest`. An explicitly tagged pull continues to pull exactly one reference.
+
+Pull is idempotent when state matches and accepts a remote cursor that is ahead
+of local state. It refuses to discard unpublished local progress or accept the
+same version with a different digest. `pull --force` intentionally moves local
+`latest` to the remote cursor while retaining existing local version tags.
+
+## Managed workflow
+
+The intended private-to-published workflow is:
+
+```text
+skillctl build -t bumbleforge.com/example/pdf-processing .
+skillctl build -t bumbleforge.com/example/pdf-processing .
+skillctl promote bumbleforge.com/example/pdf-processing
+skillctl build -t bumbleforge.com/example/pdf-processing .
+skillctl promote bumbleforge.com/example/pdf-processing
+skillctl push bumbleforge.com/example/pdf-processing
+```
+
+This may privately advance through `alpha.N`, `beta.N`, or `rc.N` before the
+first publication. `--push` on build or promote publishes the resulting local
+cursor using the same managed push behavior.
+
+Successful managed commands list every affected reference. Conflict errors
+include the local and remote versions, relevant digests, and exact pull or
+force recovery commands. Publication failure never rolls back a successful
+local build or promotion.
 
 ## Catalog identity
 
@@ -623,9 +672,9 @@ The migration guide will explain how to:
   content.
 - Consumers should verify Cosign signatures and attestations against explicit
   identity and issuer policy.
-- Immutable numbered and final tags prevent silent replacement through normal
-  SkillImage operations; consumers should still pin digests for strongest
-  guarantees.
+- Published numbered and final tags reject conflicting replacement by default.
+  `--force` is an explicit escape hatch, so consumers should still pin digests
+  for strongest guarantees.
 
 ## Extensibility
 
@@ -673,15 +722,34 @@ The migration guide will explain how to:
 
 ### Lifecycle and references
 
-- Allocate alpha, beta, and rc numbers automatically.
-- Remain in the inferred current stage.
-- Cover promotion, demotion, skipped stages, overrides, and final publication.
-- Verify `latest` follows only its active build line.
+- Drive implementation with a command-level TDD workflow covering private
+  alpha iteration, promotion to beta, beta fixes, promotion to rc, and final
+  publication.
+- Allocate alpha, beta, and rc numbers automatically from local `latest`.
+- Remain in the inferred local stage.
+- Cover automatic promotion, demotion, skipped stages, overrides, and final
+  publication.
+- Verify local `latest` is the working cursor and remote `latest` is the
+  published cursor.
 - Require a version bump after final publication.
-- Cover local and remote immutable-tag collisions.
-- Verify no `-t` creates the numbered tag plus `latest`.
-- Verify `-t` creates exactly one Podman-normalized reference.
+- Verify no `-t`, and untagged `-t`, create the effective-version tag plus
+  local `latest`.
+- Verify explicitly tagged builds create exactly one replaceable local
+  reference.
+- Verify managed push publishes the effective version and `latest` in order.
+- Cover remote-absent, matching, local-ahead, remote-ahead, rollback, and
+  same-version digest-conflict cases.
+- Verify `--force` replaces conflicting remote version and `latest` tags and
+  reports old and new digests.
+- Verify managed pull restores both the effective-version tag and local
+  `latest` without discarding unpublished work by default.
+- Verify partial publication is safely retryable.
+- Verify build and promotion remain local when `--push` fails.
+- Verify explicit push and pull references remain exact one-reference
+  operations.
 - Reject digest build targets.
+- Cover reference parsing for registry ports, nested paths, explicit tags,
+  digests, and omitted tags.
 
 ### Metadata and catalog
 
@@ -711,6 +779,9 @@ The design is satisfied when:
 - v1alpha1 remains usable with deprecation warnings.
 - The argument-free workflow manages numbered SemVer prereleases and `latest`.
 - Explicit tagging creates only the requested reference.
+- Managed push and pull synchronize the effective-version tag and `latest`
+  without losing unpublished local progress by default.
+- Build and promotion remain local unless `--push` is supplied.
 - Installation and provenance data no longer mutate packaged SkillCards.
 - Documentation explains migration, Cosign attestations, lifecycle behavior,
   and manual-control escape hatches.

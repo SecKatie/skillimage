@@ -108,6 +108,77 @@ func TestBuildAlpha2ExactTagCreatesOnlyExactReference(t *testing.T) {
 	}
 }
 
+func TestBuildAlpha2ExactTagMayBeReplacedLocally(t *testing.T) {
+	dir := writeAlpha2Skill(t, t.TempDir(), "pdf-processing")
+	client, err := oci.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	ref := "bumbleforge.com/kglitchy/skills/pdf-processing:canary"
+	first, err := client.Build(ctx, dir, oci.BuildOptions{Tag: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "changed.txt"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.Build(ctx, dir, oci.BuildOptions{Tag: ref})
+	if err != nil {
+		t.Fatalf("replacing exact local tag: %v", err)
+	}
+	if first.Digest == second.Digest {
+		t.Fatal("replaced exact tag retained the old digest")
+	}
+}
+
+func TestBuildAlpha2UntaggedTargetUsesManagedLifecycle(t *testing.T) {
+	dir := writeAlpha2Skill(t, t.TempDir(), "pdf-processing")
+	client, err := oci.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	_, err = client.Build(context.Background(), dir, oci.BuildOptions{
+		Tag:    "bumbleforge.com/kglitchy/skills/pdf-processing",
+		Tagged: func(ref string) { refs = append(refs, ref) },
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	want := []string{
+		"bumbleforge.com/kglitchy/skills/pdf-processing:1.2.3-alpha.1",
+		"bumbleforge.com/kglitchy/skills/pdf-processing:latest",
+	}
+	if strings.Join(refs, ",") != strings.Join(want, ",") {
+		t.Fatalf("refs = %v, want %v", refs, want)
+	}
+}
+
+func TestBuildAlpha2UntaggedTargetHonorsStageOverride(t *testing.T) {
+	dir := writeAlpha2Skill(t, t.TempDir(), "pdf-processing")
+	client, err := oci.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	_, err = client.Build(context.Background(), dir, oci.BuildOptions{
+		Tag:    "bumbleforge.com/kglitchy/skills/pdf-processing",
+		Stage:  "beta",
+		Tagged: func(ref string) { refs = append(refs, ref) },
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	want := []string{
+		"bumbleforge.com/kglitchy/skills/pdf-processing:1.2.3-beta.1",
+		"bumbleforge.com/kglitchy/skills/pdf-processing:latest",
+	}
+	if strings.Join(refs, ",") != strings.Join(want, ",") {
+		t.Fatalf("refs = %v, want %v", refs, want)
+	}
+}
+
 func TestBuildAlpha2StageAndNumberOverrides(t *testing.T) {
 	dir := writeAlpha2Skill(t, t.TempDir(), "pdf-processing")
 	client, err := oci.NewClient(t.TempDir())

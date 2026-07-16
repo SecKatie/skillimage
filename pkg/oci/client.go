@@ -27,8 +27,9 @@ func NewClient(storePath string) (*Client, error) {
 
 // BuildOptions configures the Build operation.
 type BuildOptions struct {
-	// Tag is an exact Podman-style image reference. A missing registry is
-	// normalized to localhost and a missing tag to latest.
+	// Tag is a Podman-style image target. An untagged target selects the
+	// repository for managed lifecycle tags; an explicitly tagged target creates
+	// only that exact reference. A missing registry is normalized to localhost.
 	Tag string
 	// Stage overrides alpha2 lifecycle inference.
 	Stage string
@@ -54,6 +55,12 @@ type PushOptions struct {
 	// SkipTLSVerify disables TLS certificate verification for the
 	// remote registry (equivalent to --tls-verify=false).
 	SkipTLSVerify bool
+	// Force permits intentional replacement of conflicting remote tags.
+	Force bool
+	// Pushed receives each remote reference updated by Push.
+	Pushed func(string)
+	// Replaced receives each conflicting tag replaced by a forced push.
+	Replaced func(SyncReplacement)
 }
 
 // PullOptions configures the Pull operation.
@@ -64,6 +71,10 @@ type PullOptions struct {
 	// SkipTLSVerify disables TLS certificate verification for the
 	// remote registry (equivalent to --tls-verify=false).
 	SkipTLSVerify bool
+	// Force permits local latest to move back to the remote managed cursor.
+	Force bool
+	// Pulled receives each local reference created by Pull.
+	Pulled func(string)
 }
 
 // LocalImage holds metadata for an image stored in the local OCI layout.

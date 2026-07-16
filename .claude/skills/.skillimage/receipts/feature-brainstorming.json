@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "name": "feature-brainstorming",
+  "version": "0.1.0-beta.2",
+  "source": "bumbleforge.com/kglitchy/skills/feature-brainstorming:latest",
+  "digest": "sha256:f8556c4e8339c0bf1b474dc3f379863ac37b5ab586b378dd522be3ed9454d9e5",
+  "installedAt": "2026-07-16T02:17:15.281771Z"
+}

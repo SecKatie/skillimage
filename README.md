@@ -115,50 +115,58 @@ bin/skillctl validate examples/hello-world/
 # First default build creates 1.0.0-alpha.1 and latest
 bin/skillctl build examples/hello-world/
 
+# Choose a remote-shaped repository and keep the managed lifecycle tags
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/
+
 # List local images
 bin/skillctl list
 
 # Inspect metadata and OCI details
 bin/skillctl inspect localhost/hello-world:latest
 
-# Or create exactly one explicitly managed reference
+# Or create exactly one replaceable local reference
 bin/skillctl build -t ghcr.io/myorg/skills/hello-world:canary examples/hello-world/
 ```
 
 ### Lifecycle promotion
 
 ```bash
-# Promote alpha -> beta (allocates beta.1)
-bin/skillctl promote localhost/hello-world:1.0.0-alpha.1 --to beta --local
+# Promote local alpha -> beta (allocates beta.1 automatically)
+bin/skillctl promote ghcr.io/myorg/skills/hello-world
 
 # Fixes in beta remain beta and automatically advance beta.2, beta.3, ...
-bin/skillctl build examples/hello-world/
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/
 
 # Promote to final (creates the unqualified base-version tag)
-bin/skillctl promote localhost/hello-world:latest --to final --local
+bin/skillctl promote ghcr.io/myorg/skills/hello-world --to final
 
 # Explicitly move back to a lower stage when needed
-bin/skillctl demote localhost/hello-world:latest --to beta --local
+bin/skillctl demote ghcr.io/myorg/skills/hello-world --to beta
 ```
 
 Promotion updates OCI manifest annotations and retags without
 modifying image content. The layer digest stays the same from
-alpha through final. Numbered prerelease and final tags are immutable; `latest`
-and custom aliases are mutable.
+alpha through final. Local tags are replaceable workspace state. Conflicting
+remote version tags are rejected unless `--force` is supplied.
 
 ### Push and pull (remote registry)
 
 ```bash
-# Push to a remote registry
-bin/skillctl tag localhost/hello-world:1.0.0-beta.1 quay.io/myorg/skills/hello-world:1.0.0-beta.1
-bin/skillctl push quay.io/myorg/skills/hello-world:1.0.0-beta.1
+# Push the local effective version and latest to a remote registry
+bin/skillctl push ghcr.io/myorg/skills/hello-world
 
-# Pull from a remote registry
-bin/skillctl pull quay.io/myorg/hello-world:1.0.0 -o ./skills/
+# Pull remote latest and its effective version into the local store
+bin/skillctl pull ghcr.io/myorg/skills/hello-world
+
+# Build or promote locally, then publish in one command
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/ --push
+bin/skillctl promote ghcr.io/myorg/skills/hello-world --push
 ```
 
-`skillctl push` pushes one reference. Use `skillctl tag` to create each
-additional registry reference you want to publish.
+An untagged repository uses managed behavior. An explicitly tagged reference
+pushes or pulls exactly that tag. Push allows monotonic forward publication and
+refuses remote-ahead or digest-conflict cases with pull and `--force` recovery
+instructions.
 
 Authentication uses your existing `~/.docker/config.json` or
 Podman's `auth.json` -- no separate login needed.
@@ -386,10 +394,11 @@ alpha.N --> beta.N --> rc.N --> final
 
 Status is stored in OCI manifest annotations
 (`io.skillimage.status`), not inside the image. Image content
-is immutable across transitions. A default build also moves `latest`; an exact
-`-t` build creates only the requested reference. v1alpha1 retains its legacy
-draft/testing/published lifecycle and emits a deprecation warning; see the
-[migration guide](docs/migrations/v1alpha1-to-v1alpha2.md).
+is unchanged across transitions. A default build, or a build with an untagged
+`-t` repository target, creates the numbered lifecycle tag and moves `latest`.
+An explicitly tagged `-t` build creates only the requested reference. v1alpha1
+retains its legacy draft/testing/published lifecycle and emits a deprecation
+warning; see the [migration guide](docs/migrations/v1alpha1-to-v1alpha2.md).
 
 For supply-chain signing and in-toto/SLSA attestations, use the standard
 [Cosign workflow](docs/signing.md).

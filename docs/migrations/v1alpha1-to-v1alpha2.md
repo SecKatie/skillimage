@@ -86,6 +86,16 @@ localhost/pdf-processing:1.2.0-alpha.1
 localhost/pdf-processing:latest
 ```
 
+An untagged `-t` target selects a different repository while retaining this
+managed lifecycle behavior:
+
+```bash
+skillctl build -t ghcr.io/example/skills/pdf-processing ./pdf-processing
+```
+
+That first build creates `1.2.0-alpha.1` and `latest` in the selected
+repository. Use `--stage beta` when intentionally starting at `1.2.0-beta.1`.
+
 Use an exact Podman-style build reference when you want to manage tags yourself:
 
 ```bash
@@ -94,6 +104,25 @@ skillctl build -t ghcr.io/example/skills/pdf-processing:canary ./pdf-processing
 
 That command creates only the exact `canary` reference. Use `skillctl tag` for
 additional aliases.
+
+Lifecycle changes are local by default and advance automatically:
+
+```bash
+skillctl promote ghcr.io/example/skills/pdf-processing
+skillctl build -t ghcr.io/example/skills/pdf-processing ./pdf-processing
+```
+
+An untagged push publishes the local effective version and `latest`; an
+untagged pull restores both references locally:
+
+```bash
+skillctl push ghcr.io/example/skills/pdf-processing
+skillctl pull ghcr.io/example/skills/pdf-processing
+```
+
+Use `--push` on build or promote for the combined local-and-publish workflow.
+Remote-ahead and digest conflicts fail by default; `--force` is the explicit
+replacement escape hatch.
 
 ## Install provenance
 

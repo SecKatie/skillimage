@@ -18,12 +18,41 @@ import (
 // Pull copies an image from a remote registry into the local store.
 // If opts.OutputDir is set, the image is also unpacked into that directory.
 func (c *Client) Pull(ctx context.Context, ref string, opts PullOptions) (ocispec.Descriptor, error) {
+	_, tag := splitRefTag(strings.TrimSpace(ref))
+	if tag == "" {
+		repository, err := normalizeManagedRepository(ref)
+		if err != nil {
+			return ocispec.Descriptor{}, err
+		}
+		repo, err := newRemoteRepository(repository, opts.SkipTLSVerify)
+		if err != nil {
+			return ocispec.Descriptor{}, fmt.Errorf("creating remote repository: %w", err)
+		}
+		result, err := pullManagedWithRemoteRefs(ctx, repo, c.store, repository, opts.Force, func(tag string) string { return tag })
+		if err != nil {
+			return ocispec.Descriptor{}, err
+		}
+		desc, err := c.store.Resolve(ctx, result.LatestRef)
+		if err != nil {
+			return ocispec.Descriptor{}, fmt.Errorf("resolving pulled latest: %w", err)
+		}
+		if opts.Pulled != nil {
+			opts.Pulled(result.VersionRef)
+			opts.Pulled(result.LatestRef)
+		}
+		if opts.OutputDir != "" {
+			if err := c.Unpack(ctx, result.LatestRef, opts.OutputDir); err != nil {
+				return desc, fmt.Errorf("unpacking after pull: %w", err)
+			}
+		}
+		return desc, nil
+	}
+
 	repo, err := newRemoteRepository(ref, opts.SkipTLSVerify)
 	if err != nil {
 		return ocispec.Descriptor{}, fmt.Errorf("creating remote repository: %w", err)
 	}
 
-	_, tag := splitRefTag(ref)
 	desc, err := oras.Copy(ctx, repo, tag, c.store, ref, oras.DefaultCopyOptions)
 	if err != nil {
 		return ocispec.Descriptor{}, fmt.Errorf("pulling %s: %w", ref, err)
@@ -33,6 +62,9 @@ func (c *Client) Pull(ctx context.Context, ref string, opts PullOptions) (ocispe
 		if err := c.Unpack(ctx, ref, opts.OutputDir); err != nil {
 			return desc, fmt.Errorf("unpacking after pull: %w", err)
 		}
+	}
+	if opts.Pulled != nil {
+		opts.Pulled(ref)
 	}
 
 	return desc, nil

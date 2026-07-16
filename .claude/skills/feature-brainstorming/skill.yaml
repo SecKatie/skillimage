@@ -1,0 +1,8 @@
+apiVersion: skillimage.io/v1alpha2
+kind: SkillCard
+metadata:
+  version: 0.1.0
+  title: Feature Brainstorming
+  authors:
+    - name: Katie Mulliken
+      email: katie@mulliken.net

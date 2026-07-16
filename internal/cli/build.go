@@ -17,31 +17,43 @@ func newBuildCmd() *cobra.Command {
 	var stage string
 	var prereleaseNumber int
 	var allowNonconformant bool
+	var push bool
+	var force bool
+	var tlsVerify bool
 	cmd := &cobra.Command{
 		Use:   "build <dir-or-url>",
 		Short: "Build a skill directory or Git repo into local OCI images",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if force && !push {
+				return fmt.Errorf("--force requires --push")
+			}
 			if cmd.Flags().Changed("prerelease-number") && prereleaseNumber <= 0 {
 				return fmt.Errorf("--prerelease-number must be greater than zero")
 			}
 			if source.IsRemote(args[0]) {
-				return runBuildRemote(cmd, args[0], tag, mediaType, ref, filter, stage, prereleaseNumber, allowNonconformant)
+				return runBuildRemote(cmd, args[0], tag, mediaType, ref, filter, stage, prereleaseNumber, allowNonconformant, push, force, !tlsVerify)
 			}
-			return runBuild(cmd, args[0], tag, mediaType, stage, prereleaseNumber, allowNonconformant)
+			return runBuild(cmd, args[0], tag, mediaType, stage, prereleaseNumber, allowNonconformant, push, force, !tlsVerify)
 		},
 	}
-	cmd.Flags().StringVarP(&tag, "tag", "t", "", "exact image reference to create")
+	cmd.Flags().StringVarP(&tag, "tag", "t", "", "target repository, or exact reference when an explicit tag is included")
 	cmd.Flags().StringVar(&stage, "stage", "", "override lifecycle stage (alpha, beta, rc, final)")
 	cmd.Flags().IntVar(&prereleaseNumber, "prerelease-number", 0, "override prerelease number")
 	cmd.Flags().BoolVar(&allowNonconformant, "allow-nonconformant", false, "downgrade Agent Skills conformance findings to warnings")
+	cmd.Flags().BoolVar(&push, "push", false, "publish the resulting local reference(s)")
+	cmd.Flags().BoolVar(&force, "force", false, "replace conflicting remote tags when used with --push")
+	cmd.Flags().BoolVar(&tlsVerify, "tls-verify", true, "require HTTPS and verify certificates when used with --push")
 	cmd.Flags().StringVar(&mediaType, "media-type", "", `media type profile: "standard" (default) or "redhat" (for oc-mirror)`)
 	cmd.Flags().StringVar(&ref, "ref", "", "Git ref to checkout (branch, tag, or commit SHA)")
 	cmd.Flags().StringVar(&filter, "filter", "", "glob pattern to filter skills by name")
 	return cmd
 }
 
-func runBuild(cmd *cobra.Command, dir, tag, mediaType, stage string, prereleaseNumber int, allowNonconformant bool) error {
+func runBuild(cmd *cobra.Command, dir, tag, mediaType, stage string, prereleaseNumber int, allowNonconformant, push, force, skipTLSVerify bool) error {
+	if push && tag == "" {
+		return fmt.Errorf("--push requires -t with a remote repository or reference")
+	}
 	profile, err := oci.ParseMediaTypeProfile(mediaType)
 	if err != nil {
 		return err
@@ -68,14 +80,25 @@ func runBuild(cmd *cobra.Command, dir, tag, mediaType, stage string, prereleaseN
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Built %s\n", dir)
+	if len(refs) > 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "Local:")
+	}
 	for _, ref := range refs {
-		fmt.Fprintf(cmd.OutOrStdout(), "Tagged: %s\n", ref)
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", ref)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Digest: %s\n", desc.Digest)
+	if push {
+		if err := pushWithClient(cmd, client, tag, force, skipTLSVerify); err != nil {
+			return fmt.Errorf("build succeeded locally but publication failed: %w", err)
+		}
+	}
 	return nil
 }
 
-func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter, stage string, prereleaseNumber int, allowNonconformant bool) error {
+func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter, stage string, prereleaseNumber int, allowNonconformant, push, force, skipTLSVerify bool) error {
+	if push && tag == "" {
+		return fmt.Errorf("--push requires -t with a remote repository or reference")
+	}
 	profile, err := oci.ParseMediaTypeProfile(mediaType)
 	if err != nil {
 		return err
@@ -128,6 +151,13 @@ func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter, sta
 			continue
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  Digest: %s\n", desc.Digest)
+		if push {
+			if err := pushWithClient(cmd, client, tag, force, skipTLSVerify); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  Error: build succeeded locally but publication failed: %v\n", err)
+				failed++
+				continue
+			}
+		}
 		built++
 	}
 

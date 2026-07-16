@@ -30,3 +30,20 @@ func TestNormalizeBuildReferenceRejectsDigest(t *testing.T) {
 		t.Fatal("expected digest build target to fail")
 	}
 }
+
+func TestIsManagedReference(t *testing.T) {
+	tests := map[string]bool{
+		"pdf-processing":                    true,
+		"ghcr.io/acme/skills/pdf-processing": true,
+		"localhost:5000/team/pdf-processing": true,
+		"pdf-processing:canary":             false,
+		"ghcr.io/acme/pdf:beta":             false,
+		"ghcr.io/acme/pdf@sha256:abc":       false,
+		"":                                  false,
+	}
+	for input, want := range tests {
+		if got := oci.IsManagedReference(input); got != want {
+			t.Errorf("IsManagedReference(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
