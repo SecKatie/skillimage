@@ -58,6 +58,40 @@ database:
 bin/skillctl serve --registry quay.io --namespace skillimage --db :memory:
 ```
 
+### Configuration
+
+The `serve` command accepts settings from command-line flags, environment
+variables, or YAML. Values are resolved in that order. By default, `skillctl`
+looks for `config.yaml` in the current directory and in the `skillctl`
+directory under the operating system's user configuration directory. Use
+`--config <path>` to select a different file.
+
+```yaml
+registry:
+  url: quay.io
+  namespace: skillimage
+  repositories: ""
+  type: auto
+  tlsVerify: true
+  syncInterval: 60s
+server:
+  port: 8080
+  dbPath: skillctl.db
+```
+
+Every setting also has an environment-variable form:
+
+| Config key | Environment variable | Flag |
+| --- | --- | --- |
+| `registry.url` | `SKILLCTL_REGISTRY_URL` | `--registry` |
+| `registry.namespace` | `SKILLCTL_REGISTRY_NAMESPACE` | `--namespace` |
+| `registry.repositories` | `SKILLCTL_REGISTRY_REPOSITORIES` | `--repositories` |
+| `registry.type` | `SKILLCTL_REGISTRY_TYPE` | `--registry-type` |
+| `registry.tlsVerify` | `SKILLCTL_REGISTRY_TLS_VERIFY` | `--tls-verify` |
+| `registry.syncInterval` | `SKILLCTL_REGISTRY_SYNC_INTERVAL` | `--sync-interval` |
+| `server.port` | `SKILLCTL_SERVER_PORT` | `--port` |
+| `server.dbPath` | `SKILLCTL_SERVER_DB_PATH` | `--db` |
+
 ## Dev workflow (build, push, deploy)
 
 For iterating on changes against a live OpenShift cluster:

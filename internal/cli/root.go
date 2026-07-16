@@ -5,6 +5,9 @@ import (
 )
 
 func NewRootCmd(version string) *cobra.Command {
+	v := newConfig()
+	var configFile string
+
 	cmd := &cobra.Command{
 		Use:           "skillctl",
 		Short:         "Manage AI agent skills as OCI images",
@@ -12,7 +15,11 @@ func NewRootCmd(version string) *cobra.Command {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+			return loadConfig(v, configFile)
+		},
 	}
+	cmd.PersistentFlags().StringVar(&configFile, "config", "", "configuration file (default: ./config.yaml or user config directory)")
 
 	cmd.AddCommand(newValidateCmd())
 	cmd.AddCommand(newInitCmd())
@@ -28,7 +35,7 @@ func NewRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newPruneCmd())
 	cmd.AddCommand(newRmCmd())
 	cmd.AddCommand(newUpgradeCmd())
-	cmd.AddCommand(newServeCmd())
+	cmd.AddCommand(newServeCmd(v))
 	cmd.AddCommand(newCollectionCmd())
 
 	return cmd
