@@ -1,8 +1,8 @@
 # OCI Skill Registry
 
 A framework-agnostic, OCI-based registry for AI agent skills.
-Packages skills as standard OCI images, manages their lifecycle
-(draft, testing, published, deprecated, archived), and works with
+Packages skills as standard OCI images, manages a SemVer prerelease lifecycle
+(`alpha.N`, `beta.N`, `rc.N`, final), and works with
 the container tools enterprises already use: `podman`, `skopeo`,
 `crane`, and Kubernetes ImageVolumes.
 
@@ -18,7 +18,7 @@ ORAS artifacts. This means:
 - `podman pull` / `skopeo copy` / `crane pull` work out of the box
 - Kubernetes ImageVolumes can mount skills directly into agent pods
 - Standard registries (Quay, GHCR, Zot) index and serve them normally
-- Signing and verification via cosign/sigstore (planned)
+- Signing and verification via standard Cosign/Sigstore workflows
 
 ## Install
 
@@ -69,73 +69,104 @@ are available on the
 
 ### Create a skill
 
-A skill is a directory with a `skill.yaml` (SkillCard metadata)
-and a `SKILL.md` (prompt content). See `examples/hello-world/`
-for a working example.
+A skill is an Agent Skills directory with an authoritative `SKILL.md` plus a
+small `skill.yaml` containing distribution metadata. Initialize a minimal pair,
+or include functional example resources with `--full`:
 
-```yaml
-apiVersion: skillimage.io/v1alpha1
-kind: SkillCard
-metadata:
-  name: hello-world
-  namespace: examples
-  version: 1.0.0
-  description: A simple example skill.
-spec:
-  prompt: SKILL.md
+```bash
+skillctl init ./hello-world
+skillctl init ./hello-world --full
 ```
 
-The `namespace` field groups skills locally. When you run
-`skillctl list`, skills display as `namespace/name` (e.g.,
-`examples/hello-world`). The namespace is a logical grouping
-within the skill card and is independent of the remote registry
-path.
+`SKILL.md` starts with Agent Skills frontmatter:
+
+```markdown
+---
+name: hello-world
+description: Greets users warmly. Use when a user asks for a greeting.
+license: Apache-2.0
+---
+
+Greet the user warmly and ask how you can help.
+```
+
+The required v1alpha2 SkillCard is intentionally minimal:
+
+```yaml
+apiVersion: skillimage.io/v1alpha2
+kind: SkillCard
+metadata:
+  version: 1.0.0
+  title: Hello World
+  vendor: Example Corp
+  tags: [example, getting-started]
+```
+
+The Agent Skills fields `name`, `description`, `license`, `compatibility`,
+`metadata`, and `allowed-tools` live only in `SKILL.md`. Repository location is
+chosen through OCI references; it is not embedded as a namespace in the card.
 
 ### Validate, build, and inspect
 
 ```bash
-# Validate the SkillCard against the JSON Schema
+# Validate both SKILL.md and skill.yaml
 bin/skillctl validate examples/hello-world/
 
-# Build into a local OCI image (tagged as 1.0.0-draft)
+# First default build creates 1.0.0-alpha.1 and latest
 bin/skillctl build examples/hello-world/
+
+# Choose a remote-shaped repository and keep the managed lifecycle tags
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/
 
 # List local images
 bin/skillctl list
 
 # Inspect metadata and OCI details
-bin/skillctl inspect examples/hello-world:1.0.0-draft
+bin/skillctl inspect localhost/hello-world:latest
+
+# Or create exactly one replaceable local reference
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world:canary examples/hello-world/
 ```
 
 ### Lifecycle promotion
 
 ```bash
-# Promote draft -> testing (retagged as 1.0.0-testing)
-bin/skillctl promote examples/hello-world:1.0.0-draft --to testing --local
+# Promote local alpha -> beta (allocates beta.1 automatically)
+bin/skillctl promote ghcr.io/myorg/skills/hello-world
 
-# Promote testing -> published (retagged as 1.0.0 + latest)
-bin/skillctl promote examples/hello-world:1.0.0-testing --to published --local
+# Fixes in beta remain beta and automatically advance beta.2, beta.3, ...
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/
+
+# Promote to final (creates the unqualified base-version tag)
+bin/skillctl promote ghcr.io/myorg/skills/hello-world --to final
+
+# Explicitly move back to a lower stage when needed
+bin/skillctl demote ghcr.io/myorg/skills/hello-world --to beta
 ```
 
 Promotion updates OCI manifest annotations and retags without
 modifying image content. The layer digest stays the same from
-draft through published.
+alpha through final. Local tags are replaceable workspace state. Conflicting
+remote version tags are rejected unless `--force` is supplied.
 
 ### Push and pull (remote registry)
 
 ```bash
-# Push to a remote registry
-bin/skillctl push quay.io/myorg/hello-world:1.0.0-draft
+# Push the local effective version and latest to a remote registry
+bin/skillctl push ghcr.io/myorg/skills/hello-world
 
-# Pull from a remote registry
-bin/skillctl pull quay.io/myorg/hello-world:1.0.0 -o ./skills/
+# Pull remote latest and its effective version into the local store
+bin/skillctl pull ghcr.io/myorg/skills/hello-world
+
+# Build or promote locally, then publish in one command
+bin/skillctl build -t ghcr.io/myorg/skills/hello-world examples/hello-world/ --push
+bin/skillctl promote ghcr.io/myorg/skills/hello-world --push
 ```
 
-We recommend aligning the remote registry path with the skill's
-`namespace` field. For example, a skill with `namespace: business`
-would push to `quay.io/myorg/business/hello-world:1.0.0-draft`.
-This is a convention, not enforced by skillctl, but it makes it
-easier to find skills in both local and remote listings.
+An untagged repository uses managed behavior. An explicitly tagged reference
+pushes or pulls exactly that tag. Push allows monotonic forward publication and
+refuses remote-ahead or digest-conflict cases with pull and `--force` recovery
+instructions.
 
 Authentication uses your existing `~/.docker/config.json` or
 Podman's `auth.json` -- no separate login needed.
@@ -159,9 +190,9 @@ skillctl install quay.io/myorg/hello-world:1.0.0 -o ~/custom/skills/
 Supported targets: `claude`, `cursor`, `windsurf`, `opencode`,
 `openclaw`.
 
-After installing, skillctl records provenance (source registry
-and digest) in the skill's `skill.yaml` so upgrades can find
-the original source.
+For v1alpha2, skillctl records source, digest, and effective version outside the
+immutable package at `<skills-root>/.skillimage/receipts/<skill-name>.json`.
+Legacy v1alpha1 installations retain their embedded provenance behavior.
 
 ### List and upgrade installed skills
 
@@ -212,7 +243,7 @@ skopeo inspect docker://quay.io/myorg/hello-world:1.0.0 \
 # Get lifecycle status
 skopeo inspect docker://quay.io/myorg/hello-world:1.0.0 \
   | jq -r '.Annotations["io.skillimage.status"]'
-# → published
+# → final
 ```
 
 This works because all skill metadata is stored in OCI manifest
@@ -348,23 +379,29 @@ consumers: skillctl CLI, agent runtimes, CI/CD
   OCI registries (quay.io, ghcr.io, Zot)
 ```
 
-## Lifecycle states
+## Lifecycle stages
 
 ```text
-draft --> testing --> published --> deprecated --> archived
+alpha.N --> beta.N --> rc.N --> final
 ```
 
-| State | OCI tag | Example |
+| Stage | OCI tag | Example |
 | ----- | ------- | ------- |
-| draft | `<ver>-draft` | `1.0.0-draft` |
-| testing | `<ver>-testing` | `1.0.0-testing` |
-| published | `<ver>` + `latest` | `1.0.0` |
-| deprecated | `<ver>` | `1.0.0` |
-| archived | tag removed | digest only |
+| alpha | `<ver>-alpha.N` | `1.0.0-alpha.1` |
+| beta | `<ver>-beta.N` | `1.0.0-beta.2` |
+| release candidate | `<ver>-rc.N` | `1.0.0-rc.1` |
+| final | `<ver>` | `1.0.0` |
 
 Status is stored in OCI manifest annotations
 (`io.skillimage.status`), not inside the image. Image content
-is immutable across promotions.
+is unchanged across transitions. A default build, or a build with an untagged
+`-t` repository target, creates the numbered lifecycle tag and moves `latest`.
+An explicitly tagged `-t` build creates only the requested reference. v1alpha1
+retains its legacy draft/testing/published lifecycle and emits a deprecation
+warning; see the [migration guide](docs/migrations/v1alpha1-to-v1alpha2.md).
+
+For supply-chain signing and in-toto/SLSA attestations, use the standard
+[Cosign workflow](docs/signing.md).
 
 ## Similar projects
 

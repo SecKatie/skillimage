@@ -110,6 +110,22 @@ func TestCheckUpgrades_OnlyDraftTags(t *testing.T) {
 	}
 }
 
+func TestCheckUpgrades_IgnoresAlpha2PrereleasesAndLatest(t *testing.T) {
+	skills := []installed.InstalledSkill{{
+		Name: "my-skill", Version: "1.0.0", Source: "quay.io/acme/my-skill:latest", Target: "claude",
+	}}
+	lister := func(context.Context, string, bool) ([]string, error) {
+		return []string{"latest", "2.0.0-alpha.3", "2.0.0-beta.2", "2.0.0-rc.1"}, nil
+	}
+	candidates, err := installed.CheckUpgrades(context.Background(), skills, installed.CheckOptions{TagLister: lister})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("prerelease or latest alias treated as published: %#v", candidates)
+	}
+}
+
 func TestCheckUpgrades_LocalRef(t *testing.T) {
 	skills := []installed.InstalledSkill{
 		{

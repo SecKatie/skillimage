@@ -14,25 +14,46 @@ func newBuildCmd() *cobra.Command {
 	var mediaType string
 	var ref string
 	var filter string
+	var stage string
+	var prereleaseNumber int
+	var allowNonconformant bool
+	var push bool
+	var force bool
+	var tlsVerify bool
 	cmd := &cobra.Command{
 		Use:   "build <dir-or-url>",
 		Short: "Build a skill directory or Git repo into local OCI images",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if source.IsRemote(args[0]) {
-				return runBuildRemote(cmd, args[0], tag, mediaType, ref, filter)
+			if force && !push {
+				return fmt.Errorf("--force requires --push")
 			}
-			return runBuild(cmd, args[0], tag, mediaType)
+			if cmd.Flags().Changed("prerelease-number") && prereleaseNumber <= 0 {
+				return fmt.Errorf("--prerelease-number must be greater than zero")
+			}
+			if source.IsRemote(args[0]) {
+				return runBuildRemote(cmd, args[0], tag, mediaType, ref, filter, stage, prereleaseNumber, allowNonconformant, push, force, !tlsVerify)
+			}
+			return runBuild(cmd, args[0], tag, mediaType, stage, prereleaseNumber, allowNonconformant, push, force, !tlsVerify)
 		},
 	}
-	cmd.Flags().StringVar(&tag, "tag", "", "override the image tag (default: <version>-draft)")
+	cmd.Flags().StringVarP(&tag, "tag", "t", "", "target repository, or exact reference when an explicit tag is included")
+	cmd.Flags().StringVar(&stage, "stage", "", "override lifecycle stage (alpha, beta, rc, final)")
+	cmd.Flags().IntVar(&prereleaseNumber, "prerelease-number", 0, "override prerelease number")
+	cmd.Flags().BoolVar(&allowNonconformant, "allow-nonconformant", false, "downgrade Agent Skills conformance findings to warnings")
+	cmd.Flags().BoolVar(&push, "push", false, "publish the resulting local reference(s)")
+	cmd.Flags().BoolVar(&force, "force", false, "replace conflicting remote tags when used with --push")
+	cmd.Flags().BoolVar(&tlsVerify, "tls-verify", true, "require HTTPS and verify certificates when used with --push")
 	cmd.Flags().StringVar(&mediaType, "media-type", "", `media type profile: "standard" (default) or "redhat" (for oc-mirror)`)
 	cmd.Flags().StringVar(&ref, "ref", "", "Git ref to checkout (branch, tag, or commit SHA)")
 	cmd.Flags().StringVar(&filter, "filter", "", "glob pattern to filter skills by name")
 	return cmd
 }
 
-func runBuild(cmd *cobra.Command, dir, tag, mediaType string) error {
+func runBuild(cmd *cobra.Command, dir, tag, mediaType, stage string, prereleaseNumber int, allowNonconformant, push, force, skipTLSVerify bool) error {
+	if push && tag == "" {
+		return fmt.Errorf("--push requires -t with a remote repository or reference")
+	}
 	profile, err := oci.ParseMediaTypeProfile(mediaType)
 	if err != nil {
 		return err
@@ -43,19 +64,41 @@ func runBuild(cmd *cobra.Command, dir, tag, mediaType string) error {
 		return err
 	}
 
+	warn := newWarningPrinter(cmd)
+	var refs []string
 	desc, err := client.Build(cmd.Context(), dir, oci.BuildOptions{
-		Tag:       tag,
-		MediaType: profile,
+		Tag:                tag,
+		Stage:              stage,
+		PrereleaseNumber:   prereleaseNumber,
+		AllowNonconformant: allowNonconformant,
+		MediaType:          profile,
+		Warn:               warn,
+		Tagged:             func(ref string) { refs = append(refs, ref) },
 	})
 	if err != nil {
 		return fmt.Errorf("building %s: %w", dir, err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Built %s\nDigest: %s\n", dir, desc.Digest)
+	fmt.Fprintf(cmd.OutOrStdout(), "Built %s\n", dir)
+	if len(refs) > 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "Local:")
+	}
+	for _, ref := range refs {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", ref)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Digest: %s\n", desc.Digest)
+	if push {
+		if err := pushWithClient(cmd, client, tag, force, skipTLSVerify); err != nil {
+			return fmt.Errorf("build succeeded locally but publication failed: %w", err)
+		}
+	}
 	return nil
 }
 
-func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter string) error {
+func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter, stage string, prereleaseNumber int, allowNonconformant, push, force, skipTLSVerify bool) error {
+	if push && tag == "" {
+		return fmt.Errorf("--push requires -t with a remote repository or reference")
+	}
 	profile, err := oci.ParseMediaTypeProfile(mediaType)
 	if err != nil {
 		return err
@@ -84,15 +127,23 @@ func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter stri
 	if err != nil {
 		return err
 	}
+	warn := newWarningPrinter(cmd)
 
 	var built, failed int
 	for i, skill := range result.Skills {
 		fmt.Fprintf(cmd.OutOrStdout(), "Building %s (%d/%d)...\n", skill.Name, i+1, len(result.Skills))
 
 		desc, err := client.Build(ctx, skill.Dir, oci.BuildOptions{
-			Tag:       tag,
-			MediaType: profile,
-			SkillCard: skill.SkillCard,
+			Tag:                tag,
+			Stage:              stage,
+			PrereleaseNumber:   prereleaseNumber,
+			AllowNonconformant: allowNonconformant,
+			MediaType:          profile,
+			SkillCard:          skill.SkillCard,
+			Warn:               warn,
+			Tagged: func(ref string) {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Tagged: %s\n", ref)
+			},
 		})
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  Error: %v\n", err)
@@ -100,6 +151,13 @@ func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter stri
 			continue
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  Digest: %s\n", desc.Digest)
+		if push {
+			if err := pushWithClient(cmd, client, tag, force, skipTLSVerify); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  Error: build succeeded locally but publication failed: %v\n", err)
+				failed++
+				continue
+			}
+		}
 		built++
 	}
 
@@ -108,6 +166,17 @@ func runBuildRemote(cmd *cobra.Command, rawURL, tag, mediaType, ref, filter stri
 		return fmt.Errorf("%d skill(s) failed to build", failed)
 	}
 	return nil
+}
+
+func newWarningPrinter(cmd *cobra.Command) func(string) {
+	seen := make(map[string]bool)
+	return func(message string) {
+		if seen[message] {
+			return
+		}
+		seen[message] = true
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", message)
+	}
 }
 
 func sanitizeURL(raw string) string {

@@ -66,9 +66,16 @@ func inspect(ctx context.Context, store inspectableStore, ref string) (*InspectR
 	displayName := ann[ocispec.AnnotationTitle]
 	authors := ann[ocispec.AnnotationAuthors]
 	license := ann[ocispec.AnnotationLicenses]
+	vendor := ann[ocispec.AnnotationVendor]
+	imageURL := ann[ocispec.AnnotationURL]
+	documentation := ann[ocispec.AnnotationDocumentation]
 	created := ann[ocispec.AnnotationCreated]
 	tags := ann[AnnotationTags]
 	compatibility := ann[AnnotationCompatibility]
+	allowedTools := ann[AnnotationAllowedTools]
+	support := ann[AnnotationSupport]
+	changelog := ann[AnnotationChangelog]
+	skillCardVersion := ann[AnnotationSkillCardVersion]
 	wordCount := ann[AnnotationWordCount]
 
 	var totalSize int64
@@ -82,22 +89,30 @@ func inspect(ctx context.Context, store inspectableStore, ref string) (*InspectR
 	}
 
 	return &InspectResult{
-		Name:            name,
-		DisplayName:     displayName,
-		Version:         version,
-		Status:          status,
-		Description:     description,
-		Authors:         authors,
-		License:         license,
-		Tags:            tags,
-		Compatibility:   compatibility,
-		WordCount:       wordCount,
-		Digest:          desc.Digest.String(),
-		Created:         created,
-		MediaType:       desc.MediaType,
-		ConfigMediaType: manifest.Config.MediaType,
-		LayerMediaType:  layerMediaType,
-		Size:            totalSize,
-		LayerCount:      len(manifest.Layers),
+		Name:             name,
+		DisplayName:      displayName,
+		Version:          version,
+		Status:           status,
+		Description:      description,
+		Authors:          authors,
+		License:          license,
+		Vendor:           vendor,
+		URL:              imageURL,
+		Documentation:    documentation,
+		Tags:             tags,
+		Compatibility:    compatibility,
+		AllowedTools:     allowedTools,
+		Support:          support,
+		Changelog:        changelog,
+		SkillCardVersion: skillCardVersion,
+		Annotations:      ann,
+		WordCount:        wordCount,
+		Digest:           desc.Digest.String(),
+		Created:          created,
+		MediaType:        desc.MediaType,
+		ConfigMediaType:  manifest.Config.MediaType,
+		LayerMediaType:   layerMediaType,
+		Size:             totalSize,
+		LayerCount:       len(manifest.Layers),
 	}, nil
 }

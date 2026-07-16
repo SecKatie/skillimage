@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,25 +12,82 @@ import (
 	"strings"
 
 	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+
+	"github.com/redhat-et/skillimage/pkg/lifecycle"
 )
 
 // Push copies an image from the local OCI store to a remote registry.
 func (c *Client) Push(ctx context.Context, ref string, opts PushOptions) error {
+	_, tag := splitRefTag(strings.TrimSpace(ref))
+	if tag == "" {
+		repository, err := normalizeManagedRepository(ref)
+		if err != nil {
+			return err
+		}
+		repo, err := newRemoteRepository(repository, opts.SkipTLSVerify)
+		if err != nil {
+			return fmt.Errorf("creating remote repository: %w", err)
+		}
+		result, err := pushManagedWithRemoteRefs(ctx, c.store, repo, repository, opts.Force, func(tag string) string { return tag })
+		if err != nil {
+			return err
+		}
+		if opts.Replaced != nil {
+			for _, replacement := range result.Replacements {
+				opts.Replaced(replacement)
+			}
+		}
+		if opts.Pushed != nil {
+			opts.Pushed(result.VersionRef)
+			opts.Pushed(result.LatestRef)
+		}
+		return nil
+	}
+
 	repo, err := newRemoteRepository(ref, opts.SkipTLSVerify)
 	if err != nil {
 		return fmt.Errorf("creating remote repository: %w", err)
 	}
 
-	_, tag := splitRefTag(ref)
+	localDesc, err := c.store.Resolve(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("resolving local reference %s: %w", ref, err)
+	}
+	var replacement *SyncReplacement
+	if result, inspectErr := c.Inspect(ctx, ref); inspectErr == nil && result.SkillCardVersion == "skillimage.io/v1alpha2" && immutableAlpha2Tag(tag) {
+		remoteDesc, resolveErr := repo.Resolve(ctx, tag)
+		switch {
+		case resolveErr == nil && remoteDesc.Digest != localDesc.Digest && !opts.Force:
+			return fmt.Errorf("immutable remote tag %s already points to %s (local digest %s)", ref, remoteDesc.Digest, localDesc.Digest)
+		case resolveErr == nil && remoteDesc.Digest != localDesc.Digest && opts.Force:
+			replacement = &SyncReplacement{Reference: ref, OldDigest: remoteDesc.Digest.String(), NewDigest: localDesc.Digest.String()}
+		case resolveErr == nil && remoteDesc.Digest == localDesc.Digest:
+			return nil
+		case resolveErr != nil && !errors.Is(resolveErr, errdef.ErrNotFound):
+			return fmt.Errorf("checking immutable remote tag %s: %w", ref, resolveErr)
+		}
+	}
 	_, err = oras.Copy(ctx, c.store, ref, repo, tag, oras.DefaultCopyOptions)
 	if err != nil {
 		return fmt.Errorf("pushing %s: %w", ref, err)
 	}
+	if replacement != nil && opts.Replaced != nil {
+		opts.Replaced(*replacement)
+	}
+	if opts.Pushed != nil {
+		opts.Pushed(ref)
+	}
 
 	return nil
+}
+
+func immutableAlpha2Tag(tag string) bool {
+	_, _, _, err := lifecycle.ParseEffectiveVersion(tag)
+	return err == nil
 }
 
 // CopyTo copies an image from this client's store to another client's store.

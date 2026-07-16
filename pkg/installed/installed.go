@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/redhat-et/skillimage/pkg/agentskill"
 	"github.com/redhat-et/skillimage/pkg/skillcard"
 )
 
@@ -28,6 +29,7 @@ func Scan(targets map[string]string) ([]InstalledSkill, error) {
 	var skills []InstalledSkill
 
 	for target, dir := range targets {
+		receipts := readReceipts(dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -37,7 +39,7 @@ func Scan(targets map[string]string) ([]InstalledSkill, error) {
 		}
 
 		for _, entry := range entries {
-			if !entry.IsDir() {
+			if !entry.IsDir() || entry.Name() == ".skillimage" {
 				continue
 			}
 
@@ -57,13 +59,27 @@ func Scan(targets map[string]string) ([]InstalledSkill, error) {
 				continue
 			}
 
+			name := sc.Metadata.Name
+			version := sc.Metadata.Version
+			if sc.APIVersion == skillcard.APIVersionV1Alpha2 {
+				agent, parseErr := agentskill.ParseFile(filepath.Join(dir, entry.Name()))
+				if parseErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", skillPath, parseErr)
+					continue
+				}
+				name = agent.Name
+			}
 			skill := InstalledSkill{
-				Name:    sc.Metadata.Name,
-				Version: sc.Metadata.Version,
+				Name:    name,
+				Version: version,
 				Target:  target,
 				Path:    filepath.Join(dir, entry.Name()),
 			}
-			if sc.Provenance != nil {
+			if receipt, ok := receipts[name]; ok {
+				skill.Version = receipt.Version
+				skill.Source = receipt.Source
+				skill.Digest = receipt.Digest
+			} else if sc.Provenance != nil {
 				skill.Source = sc.Provenance.Source
 				skill.Digest = sc.Provenance.Commit
 			}

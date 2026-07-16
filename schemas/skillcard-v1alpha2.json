@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skillimage.io/schemas/skillcard-v1alpha2.json",
+  "title": "SkillCard v1alpha2",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "skillimage.io/v1alpha2" },
+    "kind": { "const": "SkillCard" },
+    "metadata": {
+      "type": "object",
+      "required": ["version"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "vendor": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "email": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "url": { "$ref": "#/$defs/url" },
+        "documentation": { "$ref": "#/$defs/url" },
+        "support": { "$ref": "#/$defs/url" },
+        "changelog": { "$ref": "#/$defs/url" },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "url": { "type": "string", "format": "uri", "minLength": 1 }
+  }
+}

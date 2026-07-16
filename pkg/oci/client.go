@@ -27,8 +27,21 @@ func NewClient(storePath string) (*Client, error) {
 
 // BuildOptions configures the Build operation.
 type BuildOptions struct {
-	// Tag overrides the default tag. If empty, defaults to <version>-draft.
+	// Tag is a Podman-style image target. An untagged target selects the
+	// repository for managed lifecycle tags; an explicitly tagged target creates
+	// only that exact reference. A missing registry is normalized to localhost.
 	Tag string
+	// Stage overrides alpha2 lifecycle inference.
+	Stage string
+	// PrereleaseNumber overrides automatic prerelease number allocation.
+	PrereleaseNumber int
+	// AllowNonconformant downgrades Agent Skills conformance findings to warnings.
+	AllowNonconformant bool
+	// Warn receives non-fatal diagnostics such as alpha1 deprecation and external
+	// symlink dereference notices.
+	Warn func(string)
+	// Tagged receives each reference created by Build.
+	Tagged func(string)
 	// MediaType selects the media type profile. Empty or "standard" uses
 	// standard OCI types; "redhat" uses Red Hat-specific types for oc-mirror.
 	MediaType MediaTypeProfile
@@ -42,6 +55,12 @@ type PushOptions struct {
 	// SkipTLSVerify disables TLS certificate verification for the
 	// remote registry (equivalent to --tls-verify=false).
 	SkipTLSVerify bool
+	// Force permits intentional replacement of conflicting remote tags.
+	Force bool
+	// Pushed receives each remote reference updated by Push.
+	Pushed func(string)
+	// Replaced receives each conflicting tag replaced by a forced push.
+	Replaced func(SyncReplacement)
 }
 
 // PullOptions configures the Pull operation.
@@ -52,6 +71,10 @@ type PullOptions struct {
 	// SkipTLSVerify disables TLS certificate verification for the
 	// remote registry (equivalent to --tls-verify=false).
 	SkipTLSVerify bool
+	// Force permits local latest to move back to the remote managed cursor.
+	Force bool
+	// Pulled receives each local reference created by Pull.
+	Pulled func(string)
 }
 
 // LocalImage holds metadata for an image stored in the local OCI layout.
@@ -80,21 +103,29 @@ type InspectOptions struct {
 
 // InspectResult holds detailed metadata for a skill image.
 type InspectResult struct {
-	Name          string
-	DisplayName   string
-	Version       string
-	Status        string
-	Description   string
-	Authors       string
-	License       string
-	Tags          string
-	Compatibility string
-	WordCount     string
-	Digest        string
-	Created       string
-	MediaType      string
-	ConfigMediaType string
-	LayerMediaType  string
-	Size           int64
-	LayerCount     int
+	Name             string
+	DisplayName      string
+	Version          string
+	Status           string
+	Description      string
+	Authors          string
+	License          string
+	Vendor           string
+	URL              string
+	Documentation    string
+	Tags             string
+	Compatibility    string
+	AllowedTools     string
+	Support          string
+	Changelog        string
+	SkillCardVersion string
+	Annotations      map[string]string
+	WordCount        string
+	Digest           string
+	Created          string
+	MediaType        string
+	ConfigMediaType  string
+	LayerMediaType   string
+	Size             int64
+	LayerCount       int
 }

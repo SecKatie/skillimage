@@ -1,23 +1,12 @@
-apiVersion: skillimage.io/v1alpha1
+apiVersion: skillimage.io/v1alpha2
 kind: SkillCard
 metadata:
-  name: hello-world
-  namespace: examples
   version: 1.0.0
-  display-name: "Hello World"
-  description: >
-    A simple example skill that greets the user.
-    Use this as a template for creating new skills.
-  license: Apache-2.0
+  title: Hello World
+  vendor: OCTO Team
   tags:
     - example
     - getting-started
-  compatibility: claude-3.5-sonnet
   authors:
     - name: OCTO Team
       email: octo@redhat.com
-spec:
-  prompt: SKILL.md
-  examples:
-    - input: "Hello"
-      output: "Hello! How can I help you today?"

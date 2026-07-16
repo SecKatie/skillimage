@@ -9,6 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/redhat-et/skillimage/pkg/agentskill"
+	"github.com/redhat-et/skillimage/pkg/installed"
 	"github.com/redhat-et/skillimage/pkg/oci"
 	"github.com/redhat-et/skillimage/pkg/skillcard"
 )
@@ -86,10 +88,14 @@ func runInstall(cmd *cobra.Command, ref string, target string, outputDir string)
 	}
 
 	ctx := cmd.Context()
+	installRef, err := resolveInstallRef(ref)
+	if err != nil {
+		return err
+	}
 
 	// If the ref looks remote, pull it first if not already in the local store.
 	if !looksLocal(ref) {
-		if _, err := client.ResolveDigest(ctx, ref); err != nil {
+		if _, err := client.ResolveDigest(ctx, installRef); err != nil {
 			fmt.Fprintf(cmd.OutOrStdout(), "Pulling %s...\n", ref)
 			if _, pullErr := client.Pull(ctx, ref, oci.PullOptions{}); pullErr != nil {
 				return fmt.Errorf("pulling %s: %w", ref, pullErr)
@@ -97,19 +103,66 @@ func runInstall(cmd *cobra.Command, ref string, target string, outputDir string)
 		}
 	}
 
-	if err := client.Unpack(ctx, ref, outputDir); err != nil {
+	if err := client.Unpack(ctx, installRef, outputDir); err != nil {
 		return fmt.Errorf("installing %s: %w", ref, err)
 	}
 
-	dest := filepath.Join(outputDir, oci.SkillNameFromRef(ref))
+	dest := filepath.Join(outputDir, oci.SkillNameFromRef(installRef))
 
-	// Write provenance into skill.yaml.
-	if err := WriteProvenance(ctx, client, ref, dest); err != nil {
-		return fmt.Errorf("writing provenance: %w", err)
+	if err := RecordInstallation(ctx, client, installRef, outputDir, dest); err != nil {
+		return fmt.Errorf("recording installation: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "Installed %s to %s\n", ref, dest)
 	return nil
+}
+
+// resolveInstallRef maps an untagged managed repository to the local latest
+// tag created by Pull. Exact tags and digests are already directly resolvable.
+func resolveInstallRef(ref string) (string, error) {
+	if !oci.IsManagedReference(ref) {
+		return ref, nil
+	}
+	repository, err := oci.NormalizeManagedRepository(ref)
+	if err != nil {
+		return "", fmt.Errorf("normalizing install reference: %w", err)
+	}
+	return repository + ":latest", nil
+}
+
+// RecordInstallation preserves alpha1's embedded provenance behavior while
+// recording alpha2 provenance in an external installation receipt.
+func RecordInstallation(ctx context.Context, client *oci.Client, ref, skillsRoot, skillDir string) error {
+	f, err := os.Open(filepath.Join(skillDir, "skill.yaml"))
+	if err != nil {
+		return fmt.Errorf("opening skill.yaml: %w", err)
+	}
+	sc, err := skillcard.Parse(f)
+	_ = f.Close()
+	if err != nil {
+		return fmt.Errorf("parsing skill.yaml: %w", err)
+	}
+	if sc.APIVersion != skillcard.APIVersionV1Alpha2 {
+		return WriteProvenance(ctx, client, ref, skillDir)
+	}
+	agent, err := agentskill.ParseFile(skillDir)
+	if err != nil {
+		return err
+	}
+	name := agent.Name
+	if !agentskill.HasUsableName(agent, skillDir) {
+		name = agentskill.DirectoryName(skillDir)
+	}
+	result, err := client.Inspect(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return installed.WriteReceipt(skillsRoot, installed.Receipt{
+		Name:    name,
+		Version: result.Version,
+		Source:  ref,
+		Digest:  result.Digest,
+	})
 }
 
 func WriteProvenance(ctx context.Context, client *oci.Client, ref, skillDir string) error {
